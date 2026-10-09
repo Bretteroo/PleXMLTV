@@ -26,7 +26,7 @@ _Because good data deserves open standards_
 
 # PleXMLTV
 
-PleXMLTV is a Python script that pulls the guide data _you're already paying for_ out of Plex's SQLite databases and converts it to the standard XMLTV format.
+PleXMLTV is a Python script that pulls the guide data _you're already paying for_ out of Plex's SQLite databases and converts it to standard XMLTV format.
 
 This script will only work for Plex Pass subscribers.
 
