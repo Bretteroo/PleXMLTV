@@ -16,9 +16,7 @@
 
 ---
 
-_Open standards. Endless possibilities._
-
-_Because good data knows no boundaries._
+_Because good data deserves open standards_
 
 [🧭 How it works](#-how-it-works) | [🚀 One-time setup](#-one-time-setup) | [📺 Usage](#-usage) | [🔧 Troubleshooting](#-troubleshooting) | [🔒 License](#-license)
 
@@ -40,7 +38,7 @@ If you don't want to pay _anyone_ for guide data, there are [other projects out 
 
 PleXMLTV is a single, standalone Python script that runs on your Plex server. It needs Python 3.10 or newer.
 
-It finds Plex's data directory on its own, extracts what it needs out of Plex's guide data, and outputs it to an XML file that is fully compliant with the  [XMLTV DTD specification](https://github.com/XMLTV/xmltv/blob/master/xmltv.dtd).
+It finds Plex's data directory on its own, extracts what it needs out of Plex's guide data, and outputs it to an XML file that is fully compliant with the [XMLTV DTD specification](https://github.com/XMLTV/xmltv/blob/master/xmltv.dtd).
 
 The script runs entirely locally.  It doesn't send or receive any data over the network.
 
@@ -67,9 +65,7 @@ It could not be simpler.
 ./plexmltv.py                   # writes xmltv.xml beside the script.  one shot.  done.
 ```
 
-Every run starts by printing the script's version and this project's URL to stderr, so you can always tell which copy produced a file.
-
-Plex stores approximately 14 days worth of guide data.  By default, this script exports all of it.
+Your Plex server stores approximately 14 days of guide data.  By default, this script exports all of it.
 
 ### Options:
 
