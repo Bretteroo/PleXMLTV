@@ -30,15 +30,15 @@ PleXMLTV is a Python script that pulls the guide data _you're already paying for
 
 This script will only work for Plex Pass subscribers.
 
-If you don't want to pay _anyone_ for guide data, there are [other projects out there](https://github.com/shuaiscott/zap2xml) that will do what you want.
+If you don't want to pay _anyone_ for guide data, PleXMLTV is not for you.  There are [other projects](https://github.com/shuaiscott/zap2xml) that will do what you want.
 
 ---
 
 ## 🧭 How it works
 
-PleXMLTV is a single, standalone Python script that runs on your Plex server. It needs Python 3.10 or newer.
+PleXMLTV is a standalone Python script that runs on your Plex server. It needs Python 3.10 or newer.
 
-It finds Plex's data directory on its own, extracts what it needs out of Plex's guide data, and outputs it to an XML file that is fully compliant with the [XMLTV DTD specification](https://github.com/XMLTV/xmltv/blob/master/xmltv.dtd).
+It finds your Plex server's data directory on its own, extracts what it needs out of Plex's databases, and outputs it to an XML file that is fully compliant with the [XMLTV DTD specification](https://github.com/XMLTV/xmltv/blob/master/xmltv.dtd).
 
 The script runs entirely locally.  It doesn't send or receive any data over the network.
 
@@ -62,10 +62,10 @@ You'll first need to manually select which channels you want to appear in your e
 It could not be simpler.
 
 ```
-./plexmltv.py                   # writes xmltv.xml beside the script.  one shot.  done.
+./plexmltv.py
 ```
 
-Your Plex server stores approximately 14 days of guide data.  By default, this script exports all of it.
+Your Plex server stores approximately 14 days of guide data.  By default, this script exports all of it to `xmltv.xml` in the current directory.
 
 ### Options:
 
@@ -85,6 +85,7 @@ It's unlikely you'll ever need to use these, but you never know.
 --channels LIST      comma-separated channel numbers or call signs to export
 --language CODE      lang attribute for titles and descriptions (default en)
 --version            print the version and project URL, then exit
+--help / -h          what does what
 -v / -q              debug logging / warnings only
 ```
 
