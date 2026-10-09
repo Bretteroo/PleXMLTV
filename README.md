@@ -16,7 +16,9 @@
 
 ---
 
-_One command, one file_
+_Open standards. Endless possibilities._
+
+_Because good data knows no boundaries._
 
 [🧭 How it works](#-how-it-works) | [🚀 One-time setup](#-one-time-setup) | [📺 Usage](#-usage) | [🔧 Troubleshooting](#-troubleshooting) | [🔒 License](#-license)
 
