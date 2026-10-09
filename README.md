@@ -30,7 +30,7 @@ PleXMLTV is a Python script that pulls the guide data _you're already paying for
 
 This script will only work for Plex Pass subscribers.
 
-If you don't want to pay _anyone_ for guide data, PleXMLTV is not for you.  There are [other projects](https://github.com/shuaiscott/zap2xml) that will do what you want.
+If you don't want to pay _anyone_ for guide data, PleXMLTV is not for you.  There are [other](https://github.com/shuaiscott/zap2xml) [projects](https://github.com/acidjesuz/EPGTalk) that will do what you want.
 
 ---
 
