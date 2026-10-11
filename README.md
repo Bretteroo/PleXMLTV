@@ -84,10 +84,24 @@ It's unlikely you'll ever need to use these, but you never know.
 --include-disabled   include channels you disabled in Plex, if Plex still has data for them
 --channels LIST      comma-separated channel numbers or call signs to export
 --language CODE      lang attribute for titles and descriptions (default en)
+--m3u [FILE]         also write an M3U playlist; FILE defaults to channels.m3u beside the guide (env XMLTV_M3U)
+--stream-url TMPL    stream URL for each playlist channel, using {number}, {callsign} or {id} (env XMLTV_STREAM_URL)
 --version            print the version and project URL, then exit
 --help / -h          what does what
 -v / -q              debug logging / warnings only
 ```
+
+### Channel playlist
+
+Run with `--m3u` to also write `channels.m3u` beside the guide. Each entry's `tvg-id` matches its channel in the XMLTV file, so players that take an M3U plus an XMLTV guide line the two up on their own.
+
+If your tuner is a SiliconDust HDHomeRun, the stream URLs are worked out from the tuner address Plex has on record. For anything else that Plex sees as an HDHomeRun (Threadfin, xTeVe and similar), tell the script how its URLs look:
+
+```
+./plexmltv.py --m3u --stream-url 'http://192.168.1.5:34400/auto/v{number}'
+```
+
+Channels without a stream URL are left out of the playlist, with a warning naming them. Run `--list-channels` to see the URL each channel will get.
 
 ### Keeping it current
 

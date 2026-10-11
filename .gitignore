@@ -8,3 +8,4 @@ xmltv.xml*
 plex-guide.xml*
 *.xml.tmp
 .env
+*.m3u

@@ -179,6 +179,7 @@ def default_output_path(script_dir: Path | None = None) -> Path:
 
 
 DEFAULT_OUT = default_output_path()
+DEFAULT_M3U = DEFAULT_OUT.with_name("channels.m3u")
 
 PLEX_DIR_NAME = "Plex Media Server"
 PREFERENCES_NAME = "Preferences.xml"
@@ -201,6 +202,13 @@ PLEX_DATA_ROOTS = (
 )
 
 METADATA_TYPES = {1: "movie", 2: "show", 3: "season", 4: "episode"}
+
+HDHOMERUN_GRABBER = "tv.plex.grabbers.hdhomerun"
+# A SiliconDust HDHomeRun answers its API on port 80 and streams any channel
+# from port 5004 at /auto/v<number>. Emulators (Threadfin, xTeVe and the
+# like) register under the same grabber but use their own URLs.
+HDHOMERUN_STREAM_PORT = 5004
+STREAM_FIELDS = ("number", "callsign", "id")
 
 
 class PlexError(RuntimeError):
@@ -338,6 +346,7 @@ class Channel:
     enabled: bool | None = None
     source: EpgSource | None = None
     xmltv_id: str = ""
+    stream_url: str = ""
 
     @property
     def number(self) -> str:
@@ -361,6 +370,8 @@ class Config:
     include_disabled: bool = False
     channels: list[str] = field(default_factory=list)
     language: str = "en"
+    m3u: str | None = None  # None writes no playlist
+    stream_url: str = ""  # template for each channel's stream URL
 
 
 @dataclass
@@ -511,6 +522,7 @@ class TunerMapping:
     lineup_title: str = ""
     language: str = ""
     number_by_key: dict[str, str] = field(default_factory=dict)  # Plex channel key -> tuner number
+    stream_base_by_key: dict[str, str] = field(default_factory=dict)  # Plex channel key -> tuner stream base
     enabled_numbers: set[str] = field(default_factory=set)
     devices: int = 0
 
@@ -523,11 +535,26 @@ def parse_provider_extra(raw: Any) -> dict[str, str]:
     return {k: v for k, v in data.items() if isinstance(v, str)} if isinstance(data, dict) else {}
 
 
+def hdhomerun_stream_base(uri: str) -> str:
+    """http://host:5004 for a real HDHomeRun, from the address Plex keeps
+    for it. Anything on another port or path is an emulator, whose stream
+    URLs cannot be worked out offline, so return nothing for those."""
+    try:
+        parts = urllib.parse.urlsplit(uri.strip())
+        port = parts.port
+    except ValueError:
+        return ""
+    if parts.scheme != "http" or not parts.hostname or parts.path.strip("/") or port not in (None, 80):
+        return ""
+    host = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
+    return f"http://{host}:{HDHOMERUN_STREAM_PORT}"
+
+
 def load_tuner_mappings(con: sqlite3.Connection) -> dict[str, TunerMapping]:
     """DVRs keyed by uuid, with channel key -> tuner number from their tuners."""
     try:
         rows = con.execute(
-            "select id, parent_id, type, identifier, uuid, extra_data from media_provider_resources"
+            "select id, parent_id, type, identifier, uri, uuid, extra_data from media_provider_resources"
         ).fetchall()
     except sqlite3.Error as exc:
         raise PlexError(f"cannot read media_provider_resources: {exc}") from None
@@ -553,8 +580,12 @@ def load_tuner_mappings(con: sqlite3.Connection) -> dict[str, TunerMapping]:
         m = by_id[parent]
         extra = parse_provider_extra(r["extra_data"])
         m.devices += 1
+        base = hdhomerun_stream_base(text(r["uri"])) if text(r["identifier"]) == HDHOMERUN_GRABBER else ""
         for number, key in urllib.parse.parse_qsl(decode_pv(extra.get("pv:channelMappingByKey")), keep_blank_values=True):
-            m.number_by_key.setdefault(text(key), text(number))
+            if text(key) not in m.number_by_key:
+                m.number_by_key[text(key)] = text(number)
+                if base:
+                    m.stream_base_by_key[text(key)] = base
         enabled = text(extra.get("pv:channelsEnabled"))  # plain comma-separated list
         m.enabled_numbers.update(n.strip() for n in enabled.split(",") if n.strip())
     return dvrs
@@ -611,9 +642,13 @@ def db_channels(con: sqlite3.Connection, source: EpgSource, mapping: TunerMappin
             source=source,
         )
         if mapping and mapping.number_by_key:
-            number = mapping.number_by_key.get(ch.plex_id) or mapping.number_by_key.get(key_tail(ch.plex_id), "")
+            key = ch.plex_id if ch.plex_id in mapping.number_by_key else key_tail(ch.plex_id)
+            number = mapping.number_by_key.get(key, "")
             if number and NUMBER_RE.match(number):
                 ch.tuner_number = number
+                base = mapping.stream_base_by_key.get(key)
+                if base:
+                    ch.stream_url = f"{base}/auto/v{number}"
             if number and mapping.enabled_numbers:
                 ch.enabled = number in mapping.enabled_numbers
         channels.append(ch)
@@ -1115,16 +1150,73 @@ def write_xmltv(root: ET.Element, out: str) -> None:
             tmp.unlink()
 
 
+def fill_stream_template(template: str, ch: Channel) -> str:
+    values = {"number": ch.number, "callsign": ch.call_sign, "id": ch.xmltv_id}
+    return template.format(**{k: urllib.parse.quote(v, safe=".") for k, v in values.items()})
+
+
+def m3u_attr(value: str) -> str:
+    """Playlist attributes are double-quoted and the format has no escapes."""
+    return " ".join(value.replace('"', "'").split())
+
+
+def m3u_text(channels: list[Channel], template: str = "") -> tuple[str, list[Channel]]:
+    """The playlist, plus the channels left out for want of a stream URL.
+    tvg-id matches the XMLTV channel id, which is how players pair the two."""
+    lines = ["#EXTM3U"]
+    missing: list[Channel] = []
+    for ch in channels:
+        url = fill_stream_template(template, ch) if template else ch.stream_url
+        if not url or (template and not ch.number and "{number}" in template):
+            missing.append(ch)
+            continue
+        attrs = {"tvg-id": ch.xmltv_id, "tvg-chno": ch.number, "tvg-name": ch.call_sign or ch.title, "tvg-logo": usable_url(ch.thumb)}
+        attr_text = " ".join(f'{k}="{m3u_attr(v)}"' for k, v in attrs.items() if v)
+        lines.append(f"#EXTINF:-1 {attr_text},{m3u_attr(ch.title or ch.label)}")
+        lines.append(url)
+    return "\n".join(lines) + "\n", missing
+
+
+def write_m3u(channels: list[Channel], out: str, template: str = "") -> int:
+    """Write the playlist and return how many channels it holds."""
+    body, missing = m3u_text(channels, template)
+    if missing:
+        log.warning(
+            "No stream URL for %s; left out of the playlist. Pass --stream-url for tuners other than an HDHomeRun",
+            ", ".join(c.label for c in missing),
+        )
+    written = len(channels) - len(missing)
+    if not written:
+        log.warning("No channel has a stream URL, so no playlist was written")
+        return 0
+    if out == "-":
+        sys.stdout.write(body)
+        sys.stdout.flush()
+        return written
+    path = Path(out)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_text(body, encoding="utf-8")
+        os.replace(tmp, path)
+    except OSError as exc:
+        raise PlexError(f"cannot write {path}: {exc.strerror or exc}") from None
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    return written
+
+
 # --------------------------------------------------------------------------
 # Command line
 # --------------------------------------------------------------------------
 
 
 def print_channels(channels: list[Channel]) -> None:
-    rows = [("xmltv_id", "number", "callsign", "title", "enabled", "plex_id")]
+    rows = [("xmltv_id", "number", "callsign", "title", "enabled", "plex_id", "stream")]
     for ch in channels:
         enabled = "" if ch.enabled is None else ("yes" if ch.enabled else "no")
-        rows.append((ch.xmltv_id, ch.number, ch.call_sign, ch.title, enabled, ch.plex_id))
+        rows.append((ch.xmltv_id, ch.number, ch.call_sign, ch.title, enabled, ch.plex_id, ch.stream_url))
     widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
     for row in rows:
         print("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row)).rstrip())
@@ -1166,6 +1258,8 @@ def build_parser() -> argparse.ArgumentParser:
     out.add_argument("--include-disabled", action="store_true", help="include channels you disabled in Plex")
     out.add_argument("--channels", default="", help="comma-separated channel numbers or call signs to export")
     out.add_argument("--language", default="en", help="lang attribute for titles and descriptions")
+    out.add_argument("--m3u", nargs="?", const=str(DEFAULT_M3U), default=os.environ.get("XMLTV_M3U") or None, metavar="FILE", help=f"also write an M3U playlist of the channels; FILE defaults to {DEFAULT_M3U.name} beside the guide, - writes to stdout (env XMLTV_M3U)")
+    out.add_argument("--stream-url", default=os.environ.get("XMLTV_STREAM_URL", ""), metavar="TEMPLATE", help="stream URL for each playlist channel, with {number}, {callsign} or {id} filled in; needed for tuners other than an HDHomeRun (env XMLTV_STREAM_URL)")
 
     p.add_argument("--list-dvrs", action="store_true", help="print DVRs and their guide databases, then exit")
     p.add_argument("--list-channels", action="store_true", help="print the channel table, then exit")
@@ -1191,6 +1285,17 @@ def config_from_args(args: argparse.Namespace) -> Config:
         days = env_int("XMLTV_DAYS", None)
     if days is not None and not 1 <= days <= 21:
         raise PlexError("--days must be between 1 and 21")
+    m3u = args.m3u
+    if m3u and m3u != "-" and m3u == str(DEFAULT_M3U) and args.out != "-":
+        m3u = str(Path(args.out).with_name(DEFAULT_M3U.name))
+    if m3u == "-" and args.out == "-":
+        raise PlexError("--out and --m3u cannot both write to stdout")
+    if args.stream_url:
+        try:
+            fill_stream_template(args.stream_url, Channel(plex_id="", grid_key=""))
+        except (KeyError, IndexError, ValueError):
+            fields = ", ".join("{" + f + "}" for f in STREAM_FIELDS)
+            raise PlexError(f"--stream-url can only use {fields}") from None
     return Config(
         data_dir=args.data_dir,
         db=args.db,
@@ -1202,10 +1307,12 @@ def config_from_args(args: argparse.Namespace) -> Config:
         include_disabled=args.include_disabled,
         channels=[c for c in args.channels.split(",") if c.strip()],
         language=args.language,
+        m3u=m3u,
+        stream_url=args.stream_url,
     )
 
 
-def finish(root: ET.Element, stats: GuideStats, config: Config) -> int:
+def finish(root: ET.Element, stats: GuideStats, config: Config, channels: list[Channel]) -> int:
     if stats.programs == 0:
         log.error("No programs were found for any channel; nothing written")
         return 2
@@ -1219,6 +1326,10 @@ def finish(root: ET.Element, stats: GuideStats, config: Config) -> int:
     )
     if stats.empty_channels:
         log.warning("No programs for: %s", ", ".join(stats.empty_channels))
+    if config.m3u:
+        written = write_m3u(channels, config.m3u, config.stream_url)
+        if written:
+            log.info("Wrote %s: %d channels", config.m3u, written)
     return 0
 
 
@@ -1233,7 +1344,7 @@ def run(config: Config, *, list_channels: bool = False, list_dvrs: bool = False)
             print_channels(channels)
             return 0
         root, stats = build_guide(config, channels, reader)
-    return finish(root, stats, config)
+    return finish(root, stats, config, channels)
 
 
 def main(argv: list[str] | None = None) -> int:
