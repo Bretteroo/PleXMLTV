@@ -70,7 +70,7 @@ from pathlib import Path
 from typing import Any, Iterator
 from xml.etree import ElementTree as ET
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 log = logging.getLogger("plexmltv")
 
