@@ -8,6 +8,7 @@
 <img src="https://img.shields.io/badge/Python-%E2%89%A5%203.10-3776AB?logo=python&logoColor=white&style=flat-square" alt="Python 3.10 or newer">
 <img src="https://img.shields.io/badge/Plex-Plex%20Pass%20required-E5A00D?logo=plex&logoColor=white&style=flat-square" alt="Plex: Plex Pass required">
 <img src="https://img.shields.io/badge/XMLTV-DTD%20compliant-6b4fbb?style=flat-square" alt="XMLTV: DTD compliant">
+<a href="https://jellywatch.app/hub/plexmltv"><img src="https://jellywatch.app/hub/plexmltv/badge.svg" alt="Listed on JellyWatch Hub"></a>
 </p>
 
 <p>
