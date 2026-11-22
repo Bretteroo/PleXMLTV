@@ -372,6 +372,7 @@ class Config:
     language: str = "en"
     m3u: str | None = None  # None writes no playlist
     stream_url: str = ""  # template for each channel's stream URL
+    min_days: int | None = None  # None skips the freshness check
 
 
 @dataclass
@@ -381,6 +382,7 @@ class GuideStats:
     databases: int = 0
     failed_databases: int = 0
     empty_channels: list[str] = field(default_factory=list)
+    guide_end: int | None = None  # latest program stop time, epoch seconds
 
 
 Airing = tuple[Channel, dict, dict]  # channel, program, airing
@@ -1072,6 +1074,7 @@ class GuideBuilder:
         self.channels = channels
         self.config = config
         self.buckets: dict[str, dict[int, ET.Element]] = {ch.xmltv_id: {} for ch in channels}
+        self.guide_end: int | None = None
 
     def add(self, ch: Channel, item: dict, media: dict) -> bool:
         begins = to_int(media.get("beginsAt"))
@@ -1082,6 +1085,9 @@ class GuideBuilder:
         if el is None:
             return False
         bucket[begins] = el
+        ends = to_int(media.get("endsAt"))
+        if ends is not None and (self.guide_end is None or ends > self.guide_end):
+            self.guide_end = ends
         return True
 
     def render(self, stats: GuideStats) -> ET.Element:
@@ -1103,6 +1109,7 @@ class GuideBuilder:
                 root.append(bucket[begins])
                 stats.programs += 1
         stats.channels = len(self.channels)
+        stats.guide_end = self.guide_end
         return root
 
 
@@ -1259,6 +1266,7 @@ def build_parser() -> argparse.ArgumentParser:
     out.add_argument("--channels", default="", help="comma-separated channel numbers or call signs to export")
     out.add_argument("--language", default="en", help="lang attribute for titles and descriptions")
     out.add_argument("--m3u", nargs="?", const=str(DEFAULT_M3U), default=os.environ.get("XMLTV_M3U") or None, metavar="FILE", help=f"also write an M3U playlist of the channels; FILE defaults to {DEFAULT_M3U.name} beside the guide, - writes to stdout (env XMLTV_M3U)")
+    out.add_argument("--min-days", type=int, default=argparse.SUPPRESS, metavar="N", help="exit with code 3 if the guide ends less than N days from now, so a scheduler notices when Plex stops refreshing; the guide is still written (env XMLTV_MIN_DAYS; default: no check)")
     out.add_argument("--stream-url", default=os.environ.get("XMLTV_STREAM_URL", ""), metavar="TEMPLATE", help="stream URL for each playlist channel, with {number}, {callsign} or {id} filled in; needed for tuners other than an HDHomeRun (env XMLTV_STREAM_URL)")
 
     p.add_argument("--list-dvrs", action="store_true", help="print DVRs and their guide databases, then exit")
@@ -1285,6 +1293,16 @@ def config_from_args(args: argparse.Namespace) -> Config:
         days = env_int("XMLTV_DAYS", None)
     if days is not None and not 1 <= days <= 21:
         raise PlexError("--days must be between 1 and 21")
+    min_days = getattr(args, "min_days", None)
+    if min_days is None:
+        min_days = env_int("XMLTV_MIN_DAYS", None)
+    if min_days is not None:
+        if not 1 <= min_days <= 21:
+            raise PlexError("--min-days must be between 1 and 21")
+        # --days N stops at midnight UTC after day N, which can be less than
+        # N full days from now, so only a smaller --min-days can be met.
+        if days is not None and min_days >= days:
+            raise PlexError(f"--min-days must be less than --days ({days}), or every run would fail")
     m3u = args.m3u
     if m3u and m3u != "-" and m3u == str(DEFAULT_M3U) and args.out != "-":
         m3u = str(Path(args.out).with_name(DEFAULT_M3U.name))
@@ -1309,6 +1327,7 @@ def config_from_args(args: argparse.Namespace) -> Config:
         language=args.language,
         m3u=m3u,
         stream_url=args.stream_url,
+        min_days=min_days,
     )
 
 
@@ -1330,7 +1349,25 @@ def finish(root: ET.Element, stats: GuideStats, config: Config, channels: list[C
         written = write_m3u(channels, config.m3u, config.stream_url)
         if written:
             log.info("Wrote %s: %d channels", config.m3u, written)
-    return 0
+    return check_guide_end(stats, config.min_days)
+
+
+def check_guide_end(stats: GuideStats, min_days: int | None, now: datetime | None = None) -> int:
+    """Exit code 3 when the guide runs out sooner than min_days from now. A
+    guide that keeps shrinking usually means Plex has stopped refreshing it."""
+    if min_days is None or stats.guide_end is None:
+        return 0
+    now = now or datetime.now(timezone.utc)
+    ends = datetime.fromtimestamp(stats.guide_end, tz=timezone.utc)
+    if ends >= now + timedelta(days=min_days):
+        return 0
+    when = ends.astimezone().strftime("%Y-%m-%d %H:%M %Z")
+    if ends <= now:
+        status = f"Guide ended {when}"
+    else:
+        status = f"Guide ends {when}, {(ends - now).total_seconds() / 86400:.1f} days from now"
+    log.error("%s, short of --min-days %d. Check that Plex is still refreshing its guide", status, min_days)
+    return 3
 
 
 def run(config: Config, *, list_channels: bool = False, list_dvrs: bool = False) -> int:

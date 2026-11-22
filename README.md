@@ -81,6 +81,7 @@ It's unlikely you'll ever need to use these, but you never know.
 --out FILE, -o FILE  output path; .gz compresses, - writes to stdout (env XMLTV_OUT, default xmltv.xml beside the script)
 --days N             only export N days starting today, 1 to 21 (env XMLTV_DAYS; default is everything Plex has, about 14 days)
 --past-days N        with --days, also include N days before today
+--min-days N         exit with code 3 if the guide ends less than N days from now; the guide is still written (env XMLTV_MIN_DAYS)
 --id-mode MODE       what to use as the XMLTV channel id: number (default), callsign, plex
 --include-disabled   include channels you disabled in Plex, if Plex still has data for them
 --channels LIST      comma-separated channel numbers or call signs to export
@@ -109,6 +110,24 @@ Channels without a stream URL are left out of the playlist, with a warning namin
 Plex refreshes its guide daily, so you may want to run the exporter on a schedule.
 
 You can do this with a simple `cron` entry or with something needlessly elaborate like a `systemd` service.
+
+A scheduled run can't tell you when Plex stops refreshing its guide: the export keeps succeeding on what's left in the database until that runs out. Add `--min-days` to catch it early. Plex normally keeps about 14 days, so `--min-days 7` gives you a week's notice without false alarms:
+
+```
+./plexmltv.py --min-days 7
+```
+
+When the guide is short, the file is still written and the script exits with code 3, which shows up in `systemctl status`, triggers `OnFailure=` units and gets cron to send mail.
+
+Exit codes:
+
+| Code | Meaning |
+|------|---------|
+| 0    | Guide written |
+| 1    | Error, such as a missing Plex data directory or an unreadable database |
+| 2    | No programs found, so nothing was written, or an option was invalid |
+| 3    | Guide written, but it ends sooner than `--min-days` |
+| 130  | Interrupted |
 
 ## 🔧 Troubleshooting
 
